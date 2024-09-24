@@ -20,6 +20,11 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 
+from dbconnect import insert_articles,connect_db,insert_similar_articles
+
+import dbconnect  # Import the module itself
+import importlib
+
 
 class DataCollector:
     def __init__(self):
@@ -59,8 +64,8 @@ def extract_significant_words(titles,nlp):
     return processed_titles
 
 # Function to find common significant words across all titles
-def find_common_significant_words(titles):
-    processed_titles = extract_significant_words(titles)
+def find_common_significant_words(titles, nlp):
+    processed_titles = extract_significant_words(titles, nlp)
     
     # Flatten list of words for all titles
     all_words = ' '.join(processed_titles).split()
@@ -71,7 +76,13 @@ def find_common_significant_words(titles):
     # Find words that appear in more than one title (common significant words)
     common_words = [word for word, count in word_counts.items() if count > 1]
     
+    # Fallback: if no common words are found, return the original processed titles
+    if not common_words:
+        print("No common significant words found, returning original processed titles.")
+        return processed_titles  # Returning processed titles if no common words are found
+    
     return common_words
+
 
 #===================================================================================
 #   News Site Scraping
@@ -104,7 +115,7 @@ def foxnews(collector,nlp):
     for s in sector_dict:
         driver = webdriver.Firefox()
         driver.get(sector_dict[s])
-        print(s, sector_dict[s])
+        #print(s, sector_dict[s])
 
         # Scroll to load more articles
         for i in range(8):
@@ -170,7 +181,6 @@ def cnn(collector,nlp):
     for s in sector_dict:
         driver = webdriver.Firefox()
         driver.get(sector_dict[s])
-        print(s)
 
         # Scroll to load more articles
         for i in range(8):
@@ -223,6 +233,7 @@ def get_element_with_retry(driver,by,thing):
     return element
     
 def wapo(collector,nlp):
+    print("WAPO!!!")
     url = 'https://www.washingtonpost.com'
 
     driver = webdriver.Firefox()
@@ -246,7 +257,7 @@ def wapo(collector,nlp):
         for j in t:
             try:
                 # Use a retry mechanism to handle stale elements
-                sector_url = get_element_with_retry(driver, By.TAG_NAME, 'a').get_attribute('href')
+                sector_url = get_element_with_retry(j, By.TAG_NAME, 'a').get_attribute('href')
                 txt = j.find_element(By.TAG_NAME, 'a').text
                 main = i.find_element(By.TAG_NAME, 'a').text.replace("+", " ")
                 subcat = f"{main}/{txt}"
@@ -260,13 +271,13 @@ def wapo(collector,nlp):
 
     # Collect all data in a list
     all_data = []
-
+    #print(sector_dict)
     # Navigate into each sector and collect articles
     for s in sector_dict:
         driver = webdriver.Firefox()
         driver.get(sector_dict[s])
-        print("~~~~~~~~~")
-        print(s)
+        #print("~~~~~~~~~")
+        #print(s)
 
         for i in range(8):
             driver.execute_script("window.scrollTo(0, window.pageYOffset + 700);")
@@ -274,10 +285,13 @@ def wapo(collector,nlp):
 
             # Re-fetch elements after scrolling
             elements = driver.find_elements(By.CSS_SELECTOR, '[data-feature-id="homepage/story"]')
-
+            print("Here:",len(elements))
             for ele in elements:
                 text = ele.text.replace("\n", '')
-                article_url = ele.find_element(By.TAG_NAME, 'a').get_attribute('href')
+                try:
+                    article_url = ele.find_element(By.TAG_NAME, 'a').get_attribute('href')
+                except:
+                    continue
 
                 if len(text) < 3 or article_url.count('-') < 3 or text.count(' ') < 3 or len(article_url) < 5:
                     continue
@@ -294,6 +308,7 @@ def wapo(collector,nlp):
                     'Keywords': keywords,
                     'Date': date
                 }
+                #print("LOOKHERE: ",row_data)
                 all_data.append(row_data)
 
         driver.quit()
@@ -330,8 +345,6 @@ def nyt(collector,nlp):
     for s in sector_dict:
         driver = webdriver.Firefox()
         driver.get(sector_dict[s])
-        print("~~~~~~~~~")
-        print(s)
 
         # Scroll to load more articles
         for i in range(8):
@@ -343,8 +356,6 @@ def nyt(collector,nlp):
         except:
             driver.quit()
             continue
-
-        print('len: ', len(region.find_elements(By.TAG_NAME, 'article')))
 
         for ele in region.find_elements(By.TAG_NAME, 'article'):
             lnkreg = ele.find_element(By.TAG_NAME, 'a')
@@ -404,9 +415,12 @@ def get_similar_articles_with_source_names(datasets, source_names,model):
     """
     # Store all headlines and their embeddings in a dictionary
     embeddings_dict = {}
-    
+    #print(datasets)
     for idx, df in enumerate(datasets):
+        #print(df)
         headline_list = df['Article Title'].tolist()
+        #print("HLList")
+        #print(headline_list)
         embeddings = model.encode(headline_list)
         embeddings_dict[idx] = (headline_list, embeddings)
 
@@ -472,32 +486,48 @@ def get_similar_articles_with_source_names(datasets, source_names,model):
 #===================================================================================
 #
 #===================================================================================
-def get_sim_article_df(similar_articles_across_sources,data):
-    similar_articles_df = pd.DataFrame(columns=['Article Headlines','Article URLs','Keywords','Similarity Weights'])
+def get_sim_article_df(similar_articles_across_sources, data, nlp):
+    similar_articles_df = pd.DataFrame(columns=['Article Headlines', 'Article URLs', 'Keywords', 'Similarity Weights'])
+    
     for i in range(len(similar_articles_across_sources)):
         titles = similar_articles_across_sources[i][1]
-        #print(similar_articles_across_sources[i])
-            # Extract processed titles
-        processed_titles = find_common_significant_words(titles)
+        
+        # Extract processed titles
+        processed_titles = find_common_significant_words(titles, nlp)
+        
+        # Check if the processed titles are empty or contain only stop words
+        if not processed_titles or all(len(title.strip()) == 0 for title in processed_titles):
+            print("No valid content in titles after preprocessing, skipping this set of articles.")
+            continue  # Skip if no valid content
+        
+        # Proceed with TF-IDF vectorization
         vectorizer = TfidfVectorizer(stop_words='english')
         tfidf_matrix = vectorizer.fit_transform(processed_titles)
 
         feature_names = vectorizer.get_feature_names_out()
         tfidf_scores = tfidf_matrix.sum(axis=0).A1  # Sum across all documents for global score
-
+        
         tfidf_ranking = list(zip(feature_names, tfidf_scores))
         tfidf_ranking = sorted(tfidf_ranking, key=lambda x: x[1], reverse=True)
-
+        
         keywords = [word for word, score in tfidf_ranking if score > 0]
         urls = []
         for k in similar_articles_across_sources[i][2]:
             urls.append(data[data['Source'] == k[1]].iloc[k[0]]['Article URL'])
 
-        #print(keywords)
-        #print(urls)
-        similar_articles_df.loc[len(similar_articles_df)] = [titles,urls,keywords,similar_articles_across_sources[i][0]]
+        similar_articles_df.loc[len(similar_articles_df)] = [titles, urls, keywords, similar_articles_across_sources[i][0]]
+    
     return similar_articles_df
 
+def safe_join(value):
+    if isinstance(value, list):
+        return '|||'.join(value)  # Use the unique delimiter
+    elif isinstance(value, str):
+        # Already a string, return as is
+        return value
+    else:
+        # Handle other types if necessary
+        return str(value)
 
 def main():
     nlp = spacy.load('en_core_web_sm')
@@ -516,13 +546,40 @@ def main():
 
     datasets = [CNN, FOX, WAPO, NYT]
     source_names = ['CNN', 'FOX', 'WAPO', 'NYT']
-    similar_articles_across_sources = get_similar_articles_with_source_names(datasets, source_names,model)
-    similar_articles_df = get_sim_article_df(similar_articles_across_sources,data)
 
-    print(similar_articles_df)
-    print("=========================")
-    print(collector.get_dataframe())
-    print(type(similar_articles_df))
+    from datetime import date
+    data['Date'] = pd.to_datetime(data['Date'], errors='coerce')
+
+    # Fill missing dates (NaT) with the current date
+    data['Date'] = data['Date'].fillna(pd.Timestamp(date.today()))
+
+    # Convert to string format 'YYYY-MM-DD' for database insertion
+    data['Date'] = data['Date'].dt.strftime('%Y-%m-%d')
+
+    similar_articles_across_sources = get_similar_articles_with_source_names(datasets, source_names,model)
+    similar_articles_df = get_sim_article_df(similar_articles_across_sources,data,nlp)
+
+    # Apply the safe_join function to the columns
+    similar_articles_df['Article Headlines'] = similar_articles_df['Article Headlines'].apply(safe_join)
+    similar_articles_df['Article URLs'] = similar_articles_df['Article URLs'].apply(safe_join)
+    similar_articles_df['Keywords'] = similar_articles_df['Keywords'].apply(safe_join)
+
+    # Reload the dbconnect module to reflect changes
+    importlib.reload(dbconnect)
+
+    # Takes ~4min to upload to db
+    print("Attempting db connection...")
+    connection = dbconnect.connect_db()
+    print("connected to db")
+
+    # Change keywords from list to comma-separated string
+    data['Keywords'] = data['Keywords'].apply(lambda x: ','.join(x) if isinstance(x, list) else x)
+    dbconnect.insert_articles(connection, data)
+
+    print('connected, inserting...')
+    insert_similar_articles(connection,similar_articles_df)
+    connection.close()
+    print("Inserted to db and clossed connection!")
 
 if __name__ == "__main__":
     main()
