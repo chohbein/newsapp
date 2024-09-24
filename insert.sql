@@ -69,6 +69,7 @@ FROM grouped_articles ga
 JOIN sim s ON ga.similar_weight = s.similar_weight
 JOIN keywords_insert k ON ga.keyword = k.keyword;
 
---DELETE FROM raw_similar_articles;
---DELETE FROM raw_articles;
+-- Wipe raw tables
+DELETE FROM raw_similar_articles;
+DELETE FROM raw_articles;
 COMMIT;
