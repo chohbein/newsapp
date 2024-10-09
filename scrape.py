@@ -6,13 +6,16 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, ElementClickInterceptedException
 from selenium.common.exceptions import StaleElementReferenceException
 
+import requests
+from bs4 import BeautifulSoup
+
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 import pandas as pd
 import warnings
 warnings.filterwarnings("ignore")
-from datetime import datetime
+
 import spacy
 from collections import Counter
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -83,7 +86,37 @@ def find_common_significant_words(titles, nlp):
     
     return common_words
 
+def get_img(row):
+    url = row['Article URL']
+    source = row['Source']
+    if source == 'FOX':
+        print(row['Article Title'])
+        # Send a GET request to the URL
+        response = requests.get(url)
+        soup = BeautifulSoup(response.content, 'html.parser')
+        # Find all image tags
+        images = soup.find_all('img')
+        
+        # Loop through images and filter out ones starting with 'https://static.'
+        for img in images[1:]:  # Skipping the first image (if necessary)
+            image_url = img.get('src')
+            if image_url and not image_url.startswith('https://static.'):
+                return image_url
 
+        # Return None if no valid image is found
+        return None
+    
+    elif source == 'CNN':
+        print(row['Article Title'])
+        response = requests.get(url)
+        soup = BeautifulSoup(response.content,'html.parser')
+
+        images = soup.find_all('img')
+        for img in images:
+            image_url = img.get('src')
+            if image_url and not 'face' in image_url and image_url.startswith('https://'):
+                return image_url
+        return None
 #===================================================================================
 #   News Site Scraping
 #===================================================================================
@@ -123,14 +156,57 @@ def foxnews(collector,nlp):
             time.sleep(0.3)
 
         # Extract article data
-        for ele in driver.find_elements(By.XPATH, '//a[@href]'):
-            url = ele.get_attribute('href')
-            if url.count('-') <= 2 or len(ele.text) <= 2 or 'police-and-law-enforcement' in url or not url.startswith(sector_dict[s]):
-                continue
-            text = ele.text
-            keywords = extract_significant_words_from_title(text,nlp)
-            date = datetime.today().strftime('%Y-%m-%d')
+        for ele in driver.find_elements(By.TAG_NAME,'article'):
+            url = ele.find_element(By.TAG_NAME,'a').get_attribute('href')
+            try:
+                txtloc = ele.find_elements(By.TAG_NAME,'a')
+                text = txtloc[2].text
+            except:
+                for i in txtloc:
+                    if i.text == '':
+                        continue
+                    text = i.text
+                    break
 
+            if url.startswith('https://www.foxnews.com/video'):
+                continue
+
+            print('url: ',url)
+            print('text: ',text)
+            try:
+                img = ele.find_element(By.TAG_NAME,'img').get_attribute('src')
+            except:
+                row_data = {
+                    'Source': 'FOX',
+                    'Section': s,
+                    'Section URL': sector_dict[s],
+                    'Article Title': text,
+                    'Article URL': url,
+                    'Keywords': keywords,
+                    'Date': date,
+                }
+                try:
+                    img = get_img(row_data)
+                except:
+                    img = None
+            keywords = extract_significant_words_from_title(text,nlp)
+            # Get date
+            try:
+                raw_date = ele.find_element(By.CLASS_NAME, 'time').text
+                print(raw_date)
+                if any(s in raw_date for s in ['day ago','days ago']):
+                    raw_date = int(raw_date.split(' ')[0])
+                    date = (datetime.today() - timedelta(days=raw_date)).strftime('%Y-%m-%d')
+                elif any(s in raw_date for s in ['hour ago','hours ago']):
+                    raw_date = int(raw_date.split(' ')[0])
+                    date = (datetime.today() - timedelta(hours=raw_date)).strftime('%Y-%m-%d')
+                elif any(s in raw_date for s in ['year ago','years ago']):
+                    raw_date - int(raw_date.split(' ')[0])
+                    date = (datetime.today() - timedelta(years=raw_date)).strftime('%Y-%m-%d')
+                print(date)
+            except:
+                date = datetime.today().strftime('%Y-%m-%d')
+            
             # Collect the row data in a dictionary
             row_data = {
                 'Source': 'FOX',
@@ -139,7 +215,9 @@ def foxnews(collector,nlp):
                 'Article Title': text,
                 'Article URL': url,
                 'Keywords': keywords,
-                'Date': date
+                'Date': date,
+                'Image': img,
+                'Subheading': None
             }
             all_data.append(row_data)
 
@@ -148,8 +226,6 @@ def foxnews(collector,nlp):
     # Append all data at once to the DataFrame
     for row in all_data:
         collector.append_data(row)
-
-
 
 #===================================================================================
 #       CNN
@@ -208,8 +284,15 @@ def cnn(collector,nlp):
                 'Article Title': text,
                 'Article URL': url,
                 'Keywords': keywords,
-                'Date': date
+                'Date': date,
+                'Subheading': None
             }
+            try:
+                img = get_img(row_data)
+            except:
+                img = None
+            row_data['Image'] = img
+
             all_data.append(row_data)
 
         driver.quit()
@@ -298,6 +381,15 @@ def wapo(collector,nlp):
                 
                 keywords = extract_significant_words_from_title(text,nlp)
                 date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                #   Get image and subheading (if available)
+                try:
+                    image = ele.find_element(By.TAG_NAME,'img').get_attribute('src')
+                except:
+                    image = None
+                try:
+                    subheading = ele.find_element(By.TAG_NAME,'p').text
+                except:
+                    subheading = None
 
                 row_data = {
                     'Source': 'WAPO',
@@ -306,7 +398,9 @@ def wapo(collector,nlp):
                     'Article Title': text,
                     'Article URL': article_url,
                     'Keywords': keywords,
-                    'Date': date
+                    'Date': date,
+                    'Image': image,
+                    'Subheading': subheading
                 }
                 #print("LOOKHERE: ",row_data)
                 all_data.append(row_data)
@@ -374,11 +468,21 @@ def nyt(collector,nlp):
                 date = ele.find_element(By.XPATH, '..').find_element(By.CSS_SELECTOR, '[data-testid="todays-date"]').text
             except:
                 date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # If date not found, use current date
-
-            print(date, text, url)
             
             # Extract keywords and collect data
             keywords = extract_significant_words_from_title(text,nlp)
+            #   Get image and subheading, if present
+            try:
+                image = ele.find_element(By.TAG_NAME,'img').get_attribute('src')
+            except:
+                image = None
+            try:
+                subheading = ele.find_element(By.TAG_NAME,'p').text
+            except:
+                subheading = None
+            print('sh: ',subheading)
+            print('img: ',image)
+
             row_data = {
                 'Source': 'NYT',
                 'Section': s,
@@ -386,7 +490,9 @@ def nyt(collector,nlp):
                 'Article Title': text,
                 'Article URL': url,
                 'Keywords': keywords,
-                'Date': date
+                'Date': date,
+                'Image': image,
+                'Subheading': subheading
             }
             all_data.append(row_data)
 
@@ -535,9 +641,9 @@ def main():
 
     foxnews(collector,nlp)
     cnn(collector,nlp)
-    wapo(collector,nlp)
-    nyt(collector,nlp)
-
+    wapo(collector,nlp) # good
+    nyt(collector,nlp) # good
+    
     data = collector.get_dataframe()
     CNN = data[data['Source'] == 'CNN']
     FOX = data[data['Source'] == 'FOX']
@@ -564,9 +670,12 @@ def main():
     similar_articles_df['Article URLs'] = similar_articles_df['Article URLs'].apply(safe_join)
     similar_articles_df['Keywords'] = similar_articles_df['Keywords'].apply(safe_join)
 
+    data.to_csv('articles.csv')
+    similar_articles_df.to_csv('simart.csv')
+
     # Reload the dbconnect module to reflect changes
     importlib.reload(dbconnect)
-
+    
     # Takes ~4min to upload to db
     print("Attempting db connection...")
     connection = dbconnect.connect_db()

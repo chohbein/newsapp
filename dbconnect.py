@@ -6,7 +6,7 @@ def connect_db():
     connection = psycopg2.connect(
         dbname='postgres',
         user='postgres',
-        password='UuQa.falxt_2hcx>kZ+o2-UetTEg',
+        password='P7c0Eg(9{NYwv7tpV5S6J{Bw8(J?',
         host='database-postgresql.c5ecco0sis2u.us-west-1.rds.amazonaws.com',
         port='5432'
     )
@@ -19,10 +19,10 @@ def insert_articles(connection, df):
     # Insert articles using ON CONFLICT to handle duplicates
     for index, row in df.iterrows():
         cursor.execute("""
-            INSERT INTO raw_articles (article_source, article_section, section_url, title, url, article_keywords, date)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO raw_articles (article_source, article_section, section_url, title, url, article_keywords, date, image, subheading)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (url) DO NOTHING
-        """, (row['Source'], row['Section'], row['Section URL'], row['Article Title'], row['Article URL'], row['Keywords'], row['Date']))
+        """, (row['Source'], row['Section'], row['Section URL'], row['Article Title'], row['Article URL'], row['Keywords'], row['Date'], row['Image'], row['Subheading']))
 
 
     # Commit and close

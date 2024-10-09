@@ -13,10 +13,10 @@ Insert into keywords (keyword)
 
 
 --			Insert articles from raw_articles
-INSERT INTO articles (title,url,date,article_section,section_url,article_source)
-	SELECT title,url,date,article_section,section_url,article_source
-	FROM raw_articles
-	ON CONFLICT (url) DO NOTHING;
+INSERT INTO articles (title, url, date, article_section, section_url, article_source, "image", "subheading")
+SELECT title, url, date, article_section, section_url, article_source, image, subheading
+FROM raw_articles
+ON CONFLICT (url) DO NOTHING;
 
 --			Insert junct_article_keywords from articles,keywords,raw_articles
 -- Insert junct_article_keywords from articles, keywords, raw_articles
@@ -61,13 +61,15 @@ combined_insert AS (
     FROM articles a
     JOIN grouped_articles ga ON a.url = ga.article_url
     JOIN sim s ON ga.similar_weight = s.similar_weight
+	ON CONFLICT (article_id, simart_id) DO NOTHING
 )
 -- Now insert into simart_keywords to link simart_id with keyword_id
 INSERT INTO simart_keywords (simart_id, keyword_id)
 SELECT s.simart_id, k.keyword_id
 FROM grouped_articles ga
 JOIN sim s ON ga.similar_weight = s.similar_weight
-JOIN keywords_insert k ON ga.keyword = k.keyword;
+JOIN keywords_insert k ON ga.keyword = k.keyword
+ON CONFLICT (simart_id, keyword_id) DO NOTHING;
 
 -- Wipe raw tables
 DELETE FROM raw_similar_articles;
