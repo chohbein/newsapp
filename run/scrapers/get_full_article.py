@@ -1,5 +1,5 @@
 #   get_full_articles.py
-#       Read full article text and insert to database.
+#       Scrapes full article text and insert to database.
 #       DO NOT CALL 'run_all'. This runs for the entirety of the database.
 #
 #
