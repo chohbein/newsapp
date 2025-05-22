@@ -170,11 +170,11 @@ def get_keywords(title, nlp, kw_model, common_keywords, weights):
 def connect_db():
     # Establish the connection to PostgreSQL
     connection = psycopg2.connect(
-        dbname='postgres',
-        user='postgres',
-        password='P7c0Eg(9{NYwv7tpV5S6J{Bw8(J?',
-        host='news-site-db.c5ecco0sis2u.us-west-1.rds.amazonaws.com',
-        port='5432'
+        dbname='go',
+        user='away',
+        password='now!',
+        host='Prive information!',
+        port='booo'
     )
     return connection
 
@@ -338,7 +338,7 @@ def get_similar_articles(article_df):
 #   Start the 2nd instance
 def trigger_second_instance():
     try:
-        lambda_client = boto3.client('lambda')
+        lambda_client = boto3.client('..')
         response = lambda_client.invoke(
             FunctionName='Manage_EC2_Instance',
             InvocationType='RequestResponse',
