@@ -1,5 +1,4 @@
-# newsapp
-News Aggregator
+# News Aggregator
 
 
 ## ML applications
@@ -17,6 +16,8 @@ I used a combination of methods to create high-quality keywords for each article
 Finally, the extracted keywords were weighted based on their method and summed to produce the best keywords.
 
 ### Matching Similar Articles
-
-   
+1. I encoded article headlines using a transformer model. Unlike vectorizers like TF-IDF, which encodes words independently, Sentence-BERT captures contextual relationships and semantic meaning, which is helpful for our usage.
+2. Then, I computed cosine similarity scores. This was better than other scores such as euclidian distance; cosine similarity computes the angle between 2 vectors which better captures semantic similarity. Euclidian distance, for example, is for lexical similarities.
+3. Similarity scores are weighted; promoting diversity of sources and similar keywords.
+4. Lastly, DBSCAN was used to cluster articles using their similarity scores between eachother, without any predefined number of clusters.
   
