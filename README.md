@@ -2,7 +2,7 @@
 
 
 ## ML applications
-### Summarizing Topics (For notebook, see (summary_extraction.ipynb*)
+### Summarizing Topics (For notebook, see (<i>summary_extraction.ipynb<i>)
 I created a system to automatically summarize multiple news articles about the same topic. It focuses on extracting key information from clusters of related news articles, (see next step for how that was done). \
 I tested 2 different approaches to summarizing and ended up using the best one. \
 ##### Approach 1: Centroid-Based Approach to Multi-Doc Summarizing (ref. https://aclanthology.org/W00-0403.pdf)
