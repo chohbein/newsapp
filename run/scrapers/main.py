@@ -1,3 +1,8 @@
+#=======================================
+#    Main.py
+#        This file defines the processing pipeline of the entire project.
+#=======================================
+
 import glob
 from selenium import webdriver
 from selenium.webdriver.firefox.options import Options
