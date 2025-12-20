@@ -9,7 +9,7 @@ I tested 2 different approaches to summarizing and ended up using the best one. 
 This paper, by Dragomir R. Radev et al., tackles the problem by highlighting a centroid-based approach to collecting the most important sentences among the cluster of articles. \
 Briefly put, it works by applying a utility score to each sentence based on its relevance to the cluster, or the average topic of the articles, and eliminates redundancy by identifying when one sentence's information is subsumed by another. \
 Steps:
-1. Built a TF-IDF vectorizer trained from my own dataset so far (3,000+ articles)
+1. Vectorize with TF-IDF
 2. Calculated centroids to get the average representation of the group of articles.
 3. Get cosine scores of each individual sentence to the centroid.
 4. Redundant sentences identified by computing similarity scores among the chosen sentences, and eliminating those that exceed a threshold.
