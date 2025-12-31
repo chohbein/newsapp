@@ -4,8 +4,7 @@
 ## ML applications
 ### Summarizing Topics (For notebook, see <i>summary_extraction.ipynb</i>)
 I created a system to automatically summarize multiple news articles about the same topic. It focuses on extracting key information from clusters of related news articles, (see next step for how that was done). \
-I tested 2 different approaches to summarizing and ended up using the best one. 
-<video src="news_site_vid.mov" controls width="600"></video>
+I tested 2 different approaches to summarizing and ended up using the best one. See 'news_site_vid.mov' for a quick demo.
 <br>
 <br>
 <br>
