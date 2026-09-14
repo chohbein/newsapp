@@ -1,51 +1,133 @@
-# News Aggregator
+# Cross-Outlet News Clustering & Multi-Document Summarization
 
+**Solo project · Sept 2024 – 2025**
+**Stack:** Python · Selenium · spaCy · KeyBERT · Sentence-Transformers · scikit-learn (DBSCAN) · Hugging Face Transformers (PRIMERA) · PostgreSQL on AWS RDS · AWS EC2 / S3 / Lambda · Node.js/Express · React · Render
 
-## ML applications
-### Summarizing Topics (For notebook, see <i>summary_extraction.ipynb</i>)
-Welcome to my news aggregator, an automated pipeline to scrape, cluster and summarize multiple news articles about the same topic. It focuses on extracting key information from clusters of related news articles, (see next step for how that was done). \
-I tested 2 different approaches to summarizing and ended up using the best one. See 'news_site_vid.mov' for a quick demo.
-<br>
-<br>
-<br>
-##### Approach 1: Centroid-Based Approach to Multi-Doc Summarizing (ref. https://aclanthology.org/W00-0403.pdf)
-Radev et al. tackled this problem by highlighting a centroid-based approach to collecting the most important sentences among the cluster of articles. \
-Briefly put, it works by applying a utility score to each sentence based on its relevance to the cluster, or the average topic of the articles, and eliminates redundancy by identifying when one sentence's information is subsumed by another. \
-Steps:
-1. Vectorize with TF-IDF
-2. Calculated centroids to get the average representation of the group of articles.
-3. Get cosine scores of each individual sentence to the centroid.
-4. Redundant sentences identified by computing similarity scores among the chosen sentences, and eliminating those that exceed a threshold.
+---
 
-##### Approach 2: PRIMERA (Pyramid-based Masked Sentence Pre-Training for MDS)
-PRIMERA is a leading model for multi-doc summarization. It uses a pre-trained method "Entity Pyramid" to identify important sentences by looking at frequency across articles and how representative they are. \
-Steps:
-1. Leveraged the pre-trained model from Hugging Face
-2. Fine-tuned parameters for optimal length and quality
-3. Build a pipeline to clean and process the data into the model.
+## Short version
 
-##### Results
-I elected to manually analyze the results to determine which approach was better. Both approaches produced similar resulting summaries; they both generally conveyed the same information, with alterations to which sentences were being used. \
-However, PRIMERA's summaries were much smoother than approach 1. While the cluster-based approach did just as well at conveying the information, it's flow from sentence to sentence was often choppy and messy compared to PRIMERA. \
+An end-to-end ML system that scrapes eight major U.S. news outlets every day and finds articles from different outlets that cover the same story. For each story, it reads the full text of every article and writes one abstractive summary with a GPU-hosted transformer. The results are served through a web app. Each card is one story and shows which outlets covered it, the story's keywords, and its summary.
 
-### Matching Similar Articles
-1. I encoded article headlines using a transformer model. Unlike vectorizers like TF-IDF, which encodes words independently, Sentence-BERT captures contextual relationships and semantic meaning, which is helpful for our usage.
-2. Then, I computed cosine similarity scores. This was better than other scores such as euclidian distance; cosine similarity computes the angle between 2 vectors which better captures semantic similarity. Euclidian distance, for example, is for lexical similarities.
-3. Similarity scores are weighted; promoting diversity of sources and similar keywords, (see next).
-4. Lastly, DBSCAN was used to cluster articles using their similarity scores between eachother, without any predefined number of clusters.
+---
 
-### Keyword Extraction
-I used a combination of methods to create high-quality keywords for each article topic. 
-1. Part-of-Speech Extraction with (spaCy) \
-   Using spaCy's pretrained model, I lemmatized words to ensure relevance; focusing on nouns, proper nouns, and verbs. 
-2. Named Entity Recognition (spaCy) \
-   Identified named entities (organizations, people, locations, etc.), and filtered out generic tokens such as dates, values, percents. 
-3. Semantically relevant words (KeyBERT) \
-   Utilized their confidence score in the final weight calculation.
-4. Custom Keyword Matching \
-   Lastly, I put together a list of common buzzwords found in news headlines; regions, businesses, tech, political/legal, health, crime, social, and people. 
+## The problem
 
-Finally, the extracted keywords were weighted based on their method and summed to produce the best keywords.
+A single event gets covered by Fox, CNN, AP, NPR, the New York Times and others, each with its own headline and framing. To see the full picture, a reader has to find and read every version. I wanted a system that could:
 
+1. **Detect** when articles from different outlets are about the same event, with no labels and headlines that rarely share wording.
+2. **Summarize** the full coverage of that event into one readable paragraph.
+3. **Run on its own every day** at low cost.
 
+This is an unsupervised problem. New stories appear daily, there's no fixed set of topics, and the number of clusters is unknown ahead of time.
 
+---
+
+## System overview
+
+```
+ 8 news sites ──► Scrapers (EC2, CPU) ──► Keyword extraction ──► Embeddings + clustering ──► Postgres (RDS)
+                                                                                                  │
+                     Full-text fetch for clustered articles ──► S3 ──► Lambda starts GPU EC2 ◄────┘
+                                                                              │
+                                             PRIMERA summaries ──► S3 ──► Postgres ──► Express API ──► React
+```
+
+---
+
+## 1. Data collection
+
+- I wrote **custom Selenium scrapers for 8 outlets**: AP, CBS, CNN, Fox, HuffPost, NPR, NYT and the Washington Post. The scrapers run **in parallel**, with one headless browser per outlet on its own thread.
+- Each scraper finds the outlet's sections from its navigation menu, then works through each section. It handles infinite scroll (with a stopping rule and a scroll cap), dismisses modal and iframe pop-ups, and filters out video, audio and quiz content.
+- Each outlet formats dates differently ("3h ago", "JAN 06", "Oct. 9, 2024"), so the scrapers convert them all to one format.
+- For articles that end up in a story cluster, a second pass pulls the **full article body** with a text reader written for each outlet's page layout. The NYT and the Washington Post are paywalled, so they count toward clustering but not toward summaries.
+- Duplicates are removed by exact URL and by URL containment, since the same article often appears under several section paths.
+
+## 2. Keyword extraction: a weighted ensemble
+
+Each single method was noisy on short headlines, so I combined four signals and scored every candidate keyword by weighted vote:
+
+| Signal | What it catches | Weight |
+|---|---|---|
+| spaCy **named-entity recognition** (numeric, date and money entities excluded) | People, places, organizations | 2.0 |
+| **KeyBERT** (embedding-based) | Phrases that carry the headline's meaning | 0–2.0 (confidence rescaled to match the other weights) |
+| Curated **domain vocabulary** (about 100 news terms: countries, institutions, recurring topics) | High-value terms the models miss | 1.1 |
+| spaCy **part-of-speech** filter (lemmatized nouns and proper nouns) | General content words | 1.0 |
+
+A candidate is kept only if its combined score is above 1. That means a keyword needs either a strong single signal (such as a named entity) or agreement between weaker ones. The keywords feed into clustering and also power keyword browsing in the app.
+
+## 3. Story clustering
+
+The central problem is deciding which articles are about the same story.
+
+1. **Embed** every headline with a Sentence-Transformer model and compute the pairwise **cosine similarity** matrix.
+2. **Adjust similarities with domain priors** before clustering:
+   - **+0.1 if the two articles come from different outlets, −0.5 if they come from the same one.** Without this, one outlet's near-duplicate headlines (updates, cross-posts between sections) formed single-outlet clusters, which isn't what the product is for.
+   - **+0.033 for each shared keyword**, so agreement on entities and topics adds evidence beyond semantic similarity.
+3. Clip the adjusted scores to [0, 1] and run **DBSCAN on the precomputed distance matrix** (1 − similarity), with `eps = 0.1` (similarity ≥ 0.9) and `min_samples = 2`.
+   - I chose DBSCAN because the number of stories changes every day, so there's no *k* to pick. Its noise label also handles stories only one outlet covered, which are simply left out.
+4. For each cluster, compute a **cohesion score** (mean within-cluster similarity) and a **shared keyword set** (the keywords common to every article in the cluster).
+
+The app only shows clusters with cohesion ≥ 0.8 that include at least one article from the last 48 hours.
+
+## 4. Multi-document summarization: a model comparison
+
+I built and compared two approaches in a notebook before choosing one for the pipeline.
+
+**Preprocessing (both approaches):** drop empty or failed scrapes, strip leftover markup characters, remove exact duplicates (case-insensitive) and near-duplicates (RapidFuzz ratio > 85, keeping the longer text), and drop clusters left with fewer than 2 usable articles.
+
+**Approach 1: centroid-based extractive summarization.** This reimplements the MEAD centroid method from Radev et al. (2000).
+- I fit a TF-IDF vectorizer on the article corpus and saved it with joblib. Each cluster's centroid is the mean TF-IDF vector of its articles.
+- Every sentence is scored by cosine similarity to the centroid. Top sentences are selected greedily, with a redundancy filter that rejects any sentence with similarity ≥ 0.7 to one already chosen. The chosen sentences are then put back in their original order.
+
+**Approach 2: PRIMERA abstractive summarization.** PRIMERA is a Longformer encoder-decoder that was pretrained specifically for multi-document summarization.
+- The cluster's articles are joined with `<doc-sep>` tokens and truncated to 2,048 input tokens. The model generates with beam search (6 beams, length penalty 2.0, 50–200 output tokens) on CUDA.
+
+**Evaluation.** There are no reference summaries for daily news, so I used two checks: ROUGE-2 precision and recall of each summary against the combined source articles, and a manual side-by-side review of sample clusters. I noted the limitation up front: ROUGE against the sources measures overlap, not quality.
+
+**Result.** ROUGE-2 scores were similar for both approaches, and both picked out the same core facts. The difference showed up in the manual review:
+- The extractive summaries were choppy and repetitive.
+- Because the extractive method copies sentences as-is, it also copied scraping noise: photo captions, "Getty Images" credits, and all-caps promo headlines embedded in article bodies.
+- PRIMERA wrote coherent, readable prose.
+
+Approach 1 was much faster, but latency didn't matter for a daily batch job, so **I shipped PRIMERA**.
+
+## 5. Pipeline & infrastructure
+
+The pipeline uses **two EC2 instances** so the GPU is only billed while summaries are being generated:
+
+- **Instance 1 (CPU)** handles scraping, keyword extraction, clustering, the database load and the full-text fetch. It writes the unsummarized cluster text to **S3** along with a status flag, then calls an **AWS Lambda** function that starts the GPU instance.
+- **Instance 2 (GPU)** reads the text from S3, runs PRIMERA, writes the summaries and a completion flag back to S3, and **shuts itself down**.
+- Instance 1 polls for the completion flag, loads the summaries into Postgres, and **shuts itself down**.
+
+**Data model (PostgreSQL on RDS):**
+- The Python jobs bulk-insert into **staging tables**. One transactional SQL script then normalizes the data into `articles`, `keywords`, `similar_articles` (the clusters), junction tables (article↔keyword, cluster↔article, cluster↔keyword), `article_text` and `similar_article_summaries`.
+- Every insert uses `ON CONFLICT DO NOTHING`, so rerunning a day's job is safe. The staging tables are truncated at the end of the transaction.
+
+## 6. Serving
+
+- **Express API:**
+  - A feed endpoint returns recent, cohesive clusters with their articles and keywords, and fetches their summaries in one batched query.
+  - A keyword endpoint returns every article tagged with a given keyword.
+- **React front end (deployed on Render):**
+  - Each story card shows a representative headline and image (the shortest headline that has a valid image) plus an "As covered by" list linking to each outlet.
+  - Clicking a card opens the full list of articles, the summary, and clickable keyword tags that link to that keyword's article history.
+
+---
+
+## What I'd improve next
+
+- **Measure clustering quality instead of hand-tuning it.** The threshold and prior weights were tuned by inspection. The next step is to label a few hundred headline pairs, report pairwise precision and recall (or B-cubed), and grid-search `eps` and the priors.
+- **Link clusters across days.** Each run clusters its own batch, so a story that lasts several days gets a new cluster every day. Matching new articles against existing cluster centroids would fix that.
+- **Evaluate summary faithfulness.** ROUGE against the sources doesn't catch hallucinations. I'd add an NLI-based consistency check (e.g., SummaC) or an LLM judge. I'd also split the 2,048-token budget across articles, so the ones at the end of the input aren't truncated away.
+- **Harden the pipeline.** I'd replace S3 flag polling with Step Functions or Airflow, add retries, and track article counts per outlet so a scraper broken by a site redesign gets flagged instead of failing silently.
+- **Scale the similarity step.** The pairwise prior adjustments run in an O(n²) Python loop. Vectorizing them, or using an approximate nearest-neighbor index, would handle much larger daily volumes.
+
+---
+
+## Resume bullets
+
+- Built an end-to-end, automated daily NLP pipeline that scrapes 8 major news outlets, clusters same-story coverage across outlets, and generates abstractive multi-document summaries served in a React/Express web app.
+- Designed an unsupervised story-clustering method: Sentence-Transformer headline embeddings, similarity adjusted by source diversity and shared keywords (from a spaCy NER + KeyBERT + POS weighted ensemble), then DBSCAN on a precomputed distance matrix.
+- Compared centroid-based extractive summarization (TF-IDF, MEAD) with PRIMERA abstractive summarization using ROUGE-2 and manual review. Shipped PRIMERA for much more coherent output at similar ROUGE.
+- Built cost-aware AWS infrastructure: a CPU EC2 instance runs ingestion and clustering, then uses S3 and Lambda to start an on-demand GPU instance for inference. Both instances shut themselves down when done. Data loads into a normalized PostgreSQL (RDS) schema through idempotent staging-table ETL.
