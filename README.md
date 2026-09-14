@@ -26,7 +26,7 @@ This is an unsupervised problem. New stories appear daily, there's no fixed set 
 ## System overview
 
 ```
- 8 news sites ──► Scrapers (EC2, CPU) ──► Keyword extraction ──► Embeddings + clustering ──► Postgres (RDS)
+ 8 news sites ──► Scrapers (EC2) ──► Keyword extraction ──► Embeddings + clustering ──► Postgres (RDS)
                                                                                                   │
                      Full-text fetch for clustered articles ──► S3 ──► Lambda starts GPU EC2 ◄────┘
                                                                               │
