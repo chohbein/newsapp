@@ -9,7 +9,7 @@ I tested 2 different approaches to summarizing and ended up using the best one. 
 <br>
 <br>
 ##### Approach 1: Centroid-Based Approach to Multi-Doc Summarizing (ref. https://aclanthology.org/W00-0403.pdf)
-This paper, by Dragomir R. Radev et al., tackles the problem by highlighting a centroid-based approach to collecting the most important sentences among the cluster of articles. \
+Radev et al. tackled this problem by highlighting a centroid-based approach to collecting the most important sentences among the cluster of articles. \
 Briefly put, it works by applying a utility score to each sentence based on its relevance to the cluster, or the average topic of the articles, and eliminates redundancy by identifying when one sentence's information is subsumed by another. \
 Steps:
 1. Vectorize with TF-IDF
